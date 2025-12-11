@@ -79,4 +79,22 @@ public class TransactionDAO {
 
         return transactions;
     }
+
+    
+    // Overload: create transaction using an existing Connection (for transfers)
+    public boolean createTransaction(Connection conn, Transaction tx) throws SQLException {
+        String sql = "INSERT INTO transactions " +
+                     "(account_id, amount, transaction_type, description) " +
+                     "VALUES (?, ?, ?, ?)";
+
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, tx.getAccountId());
+            stmt.setBigDecimal(2, tx.getAmount());
+            stmt.setString(3, tx.getTransactionType());
+            stmt.setString(4, tx.getDescription());
+
+            int rows = stmt.executeUpdate();
+            return rows > 0;
+        }
+    }
 }

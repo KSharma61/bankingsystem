@@ -12,8 +12,8 @@ import java.math.BigDecimal;
 import java.util.List;
 
 public class App {
-    public static void main(String[] args) {
-
+    public static void main(String[] args) 
+    {
         // -------------------------
         // USER CREATION + LOGIN
         // -------------------------
@@ -144,6 +144,39 @@ public class App {
                     + t.getAmount()
                     + " on " + t.getCreatedAt()
                     + " | " + t.getDescription()
+            );
+        }
+
+        // ---------------------------
+        // TRANSFER TEST USING SERVICE
+        // ---------------------------
+
+        if (accounts.size() < 2) {
+            System.out.println("\n⚠️ Need at least 2 accounts to test transfer.");
+            return;
+        }
+
+        Account fromAccount = accounts.get(0);
+        Account toAccount   = accounts.get(1);
+
+        System.out.println("\n🔁 Testing transfer of 200.00 from "
+                + fromAccount.getAccountNumber() + " to " + toAccount.getAccountNumber());
+
+        bankingService.transfer(
+                fromAccount.getAccountId(),
+                toAccount.getAccountId(),
+                new BigDecimal("200.00"),
+                "Test transfer"
+        );
+
+        // Reload accounts and show updated balances
+        accounts = accountDAO.getAccountsByUserId(existingUser.getUserId());
+        System.out.println("\n📄 Accounts for " + existingUser.getFullName() + " (after transfer):");
+        for (Account a : accounts) {
+            System.out.println(
+                    "- " + a.getAccountNumber()
+                    + " | Balance: " + a.getBalance()
+                    + " | Status: " + a.getStatus()
             );
         }
     }
