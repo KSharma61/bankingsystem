@@ -86,11 +86,11 @@ public class App {
         }
 
         // ---------------------------
-        // DEPOSIT TEST USING SERVICE
+        // DEPOSIT & WITHDRAW TESTS
         // ---------------------------
 
         if (accounts.isEmpty()) {
-            System.out.println("User has no accounts, cannot test deposit.");
+            System.out.println("User has no accounts, cannot test deposit/withdraw.");
             return;
         }
 
@@ -107,12 +107,37 @@ public class App {
                 "Learning deposit"
         );
 
-        // Show updated transaction history
+        // Show transaction history after deposit
         TransactionDAO transactionDAO = new TransactionDAO();
         List<Transaction> history =
                 transactionDAO.getTransactionsByAccountId(firstAccount.getAccountId());
 
-        System.out.println("\n📜 Transaction history for account " + firstAccount.getAccountNumber() + ":");
+        System.out.println("\n📜 Transaction history for account "
+                + firstAccount.getAccountNumber() + " (after deposit):");
+        for (Transaction t : history) {
+            System.out.println(
+                    "- [" + t.getTransactionType() + "] "
+                    + t.getAmount()
+                    + " on " + t.getCreatedAt()
+                    + " | " + t.getDescription()
+            );
+        }
+
+        // ---------------------------
+        // WITHDRAW TEST USING SERVICE
+        // ---------------------------
+
+        bankingService.withdraw(
+                firstAccount.getAccountId(),
+                new BigDecimal("300.00"),
+                "Test withdrawal"
+        );
+
+        // Reload and show transaction history after withdrawal
+        history = transactionDAO.getTransactionsByAccountId(firstAccount.getAccountId());
+
+        System.out.println("\n📜 Transaction history for account "
+                + firstAccount.getAccountNumber() + " (after withdrawal):");
         for (Transaction t : history) {
             System.out.println(
                     "- [" + t.getTransactionType() + "] "

@@ -60,4 +60,57 @@ public class BankingService {
         System.out.println("✅ Deposit successful. New balance: " + newBalance);
         return true;
     }
+
+    // ===========================
+    // WITHDRAW MONEY FROM ACCOUNT
+    // ===========================
+    public boolean withdraw(int accountId, BigDecimal amount, String description) {
+
+        // 1) Basic validation
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            System.out.println("❌ Withdrawal amount must be positive.");
+            return false;
+        }
+
+        // 2) Load account from DB
+        Account account = accountDAO.getAccountById(accountId);
+        if (account == null) {
+            System.out.println("❌ Account not found for id: " + accountId);
+            return false;
+        }
+
+        // 3) Check sufficient balance
+        BigDecimal currentBalance = account.getBalance();
+        if (currentBalance.compareTo(amount) < 0) {
+            System.out.println("❌ Insufficient funds. Current balance: " + currentBalance);
+            return false;
+        }
+
+        // 4) Calculate new balance
+        BigDecimal newBalance = currentBalance.subtract(amount);
+
+        // 5) Update accounts table
+        boolean balanceUpdated = accountDAO.updateBalance(accountId, newBalance);
+        if (!balanceUpdated) {
+            System.out.println("❌ Failed to update balance.");
+            return false;
+        }
+
+        // 6) Log the transaction in transactions table
+        Transaction tx = new Transaction(
+                accountId,
+                amount,           // keep it positive, type = "WITHDRAWAL"
+                "WITHDRAWAL",
+                description
+        );
+
+        boolean txCreated = transactionDAO.createTransaction(tx);
+        if (!txCreated) {
+            System.out.println("⚠️ Balance updated but transaction log failed.");
+            return false;
+        }
+
+        System.out.println("✅ Withdrawal successful. New balance: " + newBalance);
+        return true;
+    }
 }
