@@ -2,27 +2,124 @@ package com.sharma.bank;
 
 import com.sharma.bank.dao.UserDAO;
 import com.sharma.bank.model.User;
+import com.sharma.bank.dao.AccountDAO;
+import com.sharma.bank.dao.TransactionDAO;
+import com.sharma.bank.model.Account;
+import com.sharma.bank.model.Transaction;
+import com.sharma.bank.service.BankingService;
 
-public class App 
-{
-    public static void main( String[] args )
-    {
+import java.math.BigDecimal;
+import java.util.List;
+
+public class App {
+    public static void main(String[] args) {
+
+        // -------------------------
+        // USER CREATION + LOGIN
+        // -------------------------
+
         UserDAO dao = new UserDAO();
+
+        // Only needed first time to insert user.
+        // After that, you can leave this commented out.
+        /*
         User user = new User("Kunj C. Sharma", "kunjcsharma69@gmail.com", "Kunj@6161");
-        //for new user.
         boolean result = dao.createUser(user);
-        if(result)
-        {
+        if (result) {
             System.out.println("🎉 User added successfully!");
-        }
-        else
-        {
+        } else {
             System.out.println("❌ Failed to add user.");
         }
-        //for login user.
+        */
+
+        // Login test (uses existing user in DB)
         boolean loginOk = dao.login("kunjcsharma69@gmail.com", "Kunj@6161");
         System.out.println("Login with correct password: " + loginOk);
-        boolean loginWrong = dao.login("kunjcsharma@gmail.com", "kunj@6161");
-        System.out.println("Login with WRONG password: " + loginWrong);
+
+        // -------------------------
+        // ACCOUNT SECTION
+        // -------------------------
+
+        AccountDAO accountDAO = new AccountDAO();
+
+        // Find the user by correct email
+        User existingUser = dao.getUserByEmail("kunjcsharma69@gmail.com");
+
+        if (existingUser == null) {
+            System.out.println("❌ Cannot create account: user not found.");
+            return;
+        }
+
+        // Generate account number
+        String accNumber = accountDAO.generateAccountNumber();
+
+        // Create account object
+        Account acc = new Account(
+                existingUser.getUserId(),
+                accNumber,
+                "SAVINGS",
+                new BigDecimal("5000.00"),
+                "ACTIVE"
+        );
+
+        // Insert into DB
+        boolean accCreated = accountDAO.createAccount(acc);
+
+        if (accCreated) {
+            System.out.println("✅ Account created: " + accNumber);
+        } else {
+            System.out.println("❌ Failed to create account.");
+        }
+
+        // Fetch all accounts for this user
+        List<Account> accounts = accountDAO.getAccountsByUserId(existingUser.getUserId());
+        System.out.println("\n📄 Accounts for " + existingUser.getFullName() + ":");
+
+        for (Account a : accounts) {
+            System.out.println(
+                    "- " + a.getAccountNumber()
+                    + " | Type: " + a.getAccountType()
+                    + " | Balance: " + a.getBalance()
+                    + " | Status: " + a.getStatus()
+                    + " | Created: " + a.getCreatedAt()
+            );
+        }
+
+        // ---------------------------
+        // DEPOSIT TEST USING SERVICE
+        // ---------------------------
+
+        if (accounts.isEmpty()) {
+            System.out.println("User has no accounts, cannot test deposit.");
+            return;
+        }
+
+        // Pick the first account
+        Account firstAccount = accounts.get(0);
+
+        // Create service
+        BankingService bankingService = new BankingService();
+
+        // Test: deposit 1000.00 into first account
+        bankingService.deposit(
+                firstAccount.getAccountId(),
+                new BigDecimal("1000.00"),
+                "Learning deposit"
+        );
+
+        // Show updated transaction history
+        TransactionDAO transactionDAO = new TransactionDAO();
+        List<Transaction> history =
+                transactionDAO.getTransactionsByAccountId(firstAccount.getAccountId());
+
+        System.out.println("\n📜 Transaction history for account " + firstAccount.getAccountNumber() + ":");
+        for (Transaction t : history) {
+            System.out.println(
+                    "- [" + t.getTransactionType() + "] "
+                    + t.getAmount()
+                    + " on " + t.getCreatedAt()
+                    + " | " + t.getDescription()
+            );
+        }
     }
 }
