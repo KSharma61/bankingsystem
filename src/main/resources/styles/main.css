@@ -1,0 +1,224 @@
+/* Base */
+.root, .appRoot {
+    -fx-font-family: "Inter", "SF Pro Display", "Segoe UI", Arial;
+    -fx-background-color: #f3f5f7;
+}
+
+/* =========================
+   LOGIN STYLES
+   ========================= */
+
+.loginRoot {
+    -fx-background-color: #f3f5f7;
+}
+
+.loginTopBar {
+    -fx-background-color: #0b234a;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.18), 18, 0.15, 0, 6);
+}
+
+.loginCenter {
+    -fx-background-color: transparent;
+}
+
+.heroPanel {
+    -fx-background-radius: 26;
+    -fx-background-color: #0b234a;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.18), 22, 0.18, 0, 10);
+}
+
+.heroSmall {
+    -fx-text-fill: rgba(255,255,255,0.78);
+    -fx-font-weight: 600;
+}
+
+.heroBig {
+    -fx-text-fill: white;
+    -fx-font-weight: 900;
+    -fx-font-size: 54px;
+}
+
+.authCard {
+    -fx-background-color: white;
+    -fx-background-radius: 26;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.18), 18, 0.18, 0, 8);
+}
+
+.authTitle {
+    -fx-font-size: 36px;
+    -fx-font-weight: 900;
+    -fx-text-fill: #111;
+}
+
+.authSub {
+    -fx-text-fill: rgba(0,0,0,0.55);
+    -fx-font-weight: 600;
+}
+
+.authField {
+    -fx-background-radius: 999;
+    -fx-background-color: #eef1f4;
+    -fx-padding: 12 16;
+    -fx-font-weight: 700;
+    -fx-border-color: transparent;
+}
+
+.authError {
+    -fx-text-fill: #b00020;
+    -fx-font-weight: 700;
+}
+
+.authPrimaryBtn {
+    -fx-background-radius: 999;
+    -fx-background-color: #1b1f24;
+    -fx-text-fill: white;
+    -fx-font-weight: 900;
+    -fx-padding: 12 16;
+}
+.authPrimaryBtn:hover { -fx-background-color: #0f1216; }
+
+.authSecondaryBtn {
+    -fx-background-radius: 999;
+    -fx-background-color: #e7eaee;
+    -fx-text-fill: #111;
+    -fx-font-weight: 900;
+    -fx-padding: 12 16;
+}
+.authSecondaryBtn:hover { -fx-background-color: #dde2e8; }
+
+/* Brand (used in login + dashboard top bar) */
+.brandTop, .brandBottom {
+    -fx-text-fill: white;
+    -fx-font-size: 20px;
+    -fx-font-weight: 800;
+}
+
+/* =========================
+   DASHBOARD STYLES
+   ========================= */
+
+.topBar {
+    -fx-background-color: #0b234a;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.18), 18, 0.15, 0, 6);
+}
+
+.pageTitle {
+    -fx-text-fill: rgba(255,255,255,0.92);
+    -fx-font-size: 18px;
+    -fx-font-weight: 700;
+}
+
+.iconBtn {
+    -fx-background-color: rgba(255,255,255,0.12);
+    -fx-text-fill: white;
+    -fx-font-size: 16px;
+    -fx-padding: 8 12;
+    -fx-background-radius: 10;
+}
+.iconBtn:hover { -fx-background-color: rgba(255,255,255,0.18); }
+
+.ghostBtn {
+    -fx-background-color: transparent;
+    -fx-text-fill: rgba(255,255,255,0.9);
+    -fx-font-weight: 700;
+}
+.ghostBtn:hover { -fx-underline: true; }
+
+/* Sidebar */
+.sidebar {
+    -fx-background-color: white;
+    -fx-border-color: rgba(0,0,0,0.06);
+    -fx-border-width: 0 1 0 0;
+}
+
+.sidebarTitle {
+    -fx-font-size: 13px;
+    -fx-font-weight: 900;
+    -fx-text-fill: #0b234a;
+}
+
+.sidebarSep { -fx-opacity: 0.35; }
+
+.navBtn {
+    -fx-background-color: transparent;
+    -fx-text-fill: #0b234a;
+    -fx-font-weight: 800;
+    -fx-padding: 10 12;
+    -fx-background-radius: 10;
+    -fx-alignment: CENTER_LEFT;
+}
+.navBtn:hover { -fx-background-color: rgba(11,35,74,0.08); }
+
+/* Page wrapper */
+.pageWrapper { -fx-background-color: transparent; }
+
+/* Balance cards */
+.balanceCard {
+    -fx-background-radius: 22;
+    -fx-background-color: linear-gradient(to bottom right, #4fd2ff, #2f8eea);
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.18), 18, 0.18, 0, 6);
+}
+
+.cardTitle {
+    -fx-text-fill: rgba(0,0,0,0.75);
+    -fx-font-weight: 900;
+    -fx-font-size: 18px;
+}
+
+.cardAmount {
+    -fx-text-fill: rgba(0,0,0,0.86);
+    -fx-font-weight: 900;
+    -fx-font-size: 34px;
+}
+
+.cardSub {
+    -fx-text-fill: rgba(0,0,0,0.62);
+    -fx-font-weight: 800;
+}
+
+/* Panels */
+.panel {
+    -fx-background-color: white;
+    -fx-background-radius: 22;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.18), 20, 0.18, 0, 8);
+}
+
+.panelTitle {
+    -fx-font-size: 18px;
+    -fx-font-weight: 900;
+    -fx-text-fill: #0b234a;
+}
+
+.muted {
+    -fx-text-fill: rgba(0,0,0,0.55);
+    -fx-font-weight: 700;
+}
+
+/* Table */
+.txTable { -fx-background-radius: 14; }
+.table-view .column-header-background {
+    -fx-background-color: rgba(11,35,74,0.06);
+}
+.table-view .column-header .label {
+    -fx-text-fill: #0b234a;
+    -fx-font-weight: 900;
+}
+
+/* Action buttons */
+.primaryBtn {
+    -fx-background-radius: 999;
+    -fx-background-color: #0b234a;
+    -fx-text-fill: white;
+    -fx-font-weight: 900;
+    -fx-padding: 10 16;
+}
+.primaryBtn:hover { -fx-background-color: #0a1d3d; }
+
+.secondaryBtn {
+    -fx-background-radius: 999;
+    -fx-background-color: rgba(11,35,74,0.12);
+    -fx-text-fill: #0b234a;
+    -fx-font-weight: 900;
+    -fx-padding: 10 16;
+}
+.secondaryBtn:hover { -fx-background-color: rgba(11,35,74,0.18); }
