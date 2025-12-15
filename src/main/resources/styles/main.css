@@ -55,6 +55,16 @@
     -fx-font-weight: 600;
 }
 
+.cardAccountNumber {
+    -fx-text-fill: rgba(0,0,0,0.65);
+    -fx-font-weight: 700;
+}
+
+.clickableCard:hover {
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.22), 20, 0.25, 0, 8);
+    -fx-cursor: hand;
+}
+
 .authField {
     -fx-background-radius: 999;
     -fx-background-color: #eef1f4;

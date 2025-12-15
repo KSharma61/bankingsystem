@@ -30,9 +30,15 @@ import java.util.regex.Pattern;
 public class MainUI extends Application 
 {
     // ---- Top navigation pages (marketing site) ----
-    private enum PublicPage { HOME, ABOUT, CONTACT, LOGIN }
+    private enum PublicPage { HOME, ABOUT, CONTACT, LOGIN, SIGNUP }
     private PublicPage activePublicPage = PublicPage.LOGIN;
 
+    // Remember which accounts to show on dashboard cards (optional override)
+    private Integer dashboardChequingAccountId = null;
+    private Integer dashboardSavingsAccountId = null;
+
+    // When we navigate to Accounts page from a card click, we preselect this account
+    private Integer accountsPageSelectedAccountId = null;
 
     private Stage stage;
     private Scene scene;
@@ -95,6 +101,14 @@ public class MainUI extends Application
         stage.show();
     }
 
+    private Account findAccountById(Integer accountId) 
+    {
+        if (accountId == null || userAccounts == null) return null;
+        for (Account a : userAccounts) {
+            if (a.getAccountId() == accountId) return a;
+        }
+        return null;
+    }
 
     private Account pickAccountForCard(String... typeKeywords) 
     {
@@ -127,7 +141,7 @@ public class MainUI extends Application
         // Account selector (NEW)
         // -------------------------
         ComboBox<Account> accountBox = new ComboBox<>();
-        accountBox.setItems(FXCollections.observableArrayList(userAccounts == null ? List.of() : userAccounts));
+        accountBox.setItems(FXCollections.observableArrayList(activeAccountsOnly(userAccounts)));
 
         accountBox.setCellFactory(cb -> new ListCell<>() {
             @Override protected void updateItem(Account a, boolean empty) {
@@ -138,8 +152,10 @@ public class MainUI extends Application
         accountBox.setButtonCell(accountBox.getCellFactory().call(null));
 
         // Default selection: Chequing if exists else first account
+        List<Account> active = activeAccountsOnly(userAccounts);
+
         Account defaultAcc = chequing != null ? chequing
-                : (userAccounts != null && !userAccounts.isEmpty() ? userAccounts.get(0) : null);
+                : (!active.isEmpty() ? active.get(0) : null);
         accountBox.setValue(defaultAcc);
 
         HBox selectorRow = new HBox(10, new Label("Account:"), accountBox);
@@ -155,6 +171,10 @@ public class MainUI extends Application
         table.setFixedCellSize(40);
         VBox.setVgrow(table, Priority.ALWAYS);
 
+        // NEW: Date/Time column
+        TableColumn<TxRow, String> colDate = new TableColumn<>("Date/Time");
+        colDate.setCellValueFactory(d -> d.getValue().dateTime);
+
         TableColumn<TxRow, String> colType = new TableColumn<>("Type");
         colType.setCellValueFactory(d -> d.getValue().type);
 
@@ -164,13 +184,14 @@ public class MainUI extends Application
         TableColumn<TxRow, String> colDesc = new TableColumn<>("Description");
         colDesc.setCellValueFactory(d -> d.getValue().desc);
 
-        table.getColumns().addAll(colType, colAmt, colDesc);
+        // include colDate
+        table.getColumns().setAll(colDate, colType, colAmt, colDesc);
 
         Runnable reloadTable = () -> {
             Account selected = accountBox.getValue();
             if (selected == null) {
                 table.setItems(FXCollections.observableArrayList(
-                        new TxRow("INFO", "$0.00", "No account selected")
+                        new TxRow("-", "INFO", "$0.00", "No account selected")
                 ));
                 return;
             }
@@ -182,6 +203,7 @@ public class MainUI extends Application
             for (int i = 0; i < Math.min(10, txs.size()); i++) {
                 Transaction t = txs.get(i);
                 rows.add(new TxRow(
+                        formatTxTime(t.getCreatedAt()),
                         safe(t.getTransactionType()),
                         money(t.getAmount()),
                         safe(t.getDescription())
@@ -189,11 +211,12 @@ public class MainUI extends Application
             }
 
             if (rows.isEmpty()) {
-                rows.add(new TxRow("INFO", "$0.00", "No transactions yet"));
+                rows.add(new TxRow("-", "INFO", "$0.00", "No transactions yet"));
             }
 
             table.setItems(rows);
         };
+
 
         // load once
         reloadTable.run();
@@ -213,10 +236,13 @@ public class MainUI extends Application
         Button transferBtn = new Button("Transfer");
         transferBtn.getStyleClass().add("secondaryBtn");
 
+
         depositBtn.setOnAction(e -> {
             Account selected = accountBox.getValue();
-            if (selected == null) {
-                showSimpleAlert("No account", "Select an account first.");
+            Account fresh = accountDAO.getAccountById(selected.getAccountId());
+            if (fresh != null && "CLOSED".equalsIgnoreCase(fresh.getStatus())) {
+                showSimpleAlert("Account closed", "This account is CLOSED and cannot be used for transactions.");
+                refreshDashboardData();
                 return;
             }
 
@@ -234,8 +260,10 @@ public class MainUI extends Application
 
         withdrawBtn.setOnAction(e -> {
             Account selected = accountBox.getValue();
-            if (selected == null) {
-                showSimpleAlert("No account", "Select an account first.");
+            Account fresh = accountDAO.getAccountById(selected.getAccountId());
+            if (fresh != null && "CLOSED".equalsIgnoreCase(fresh.getStatus())) {
+                showSimpleAlert("Account closed", "This account is CLOSED and cannot be used for transactions.");
+                refreshDashboardData();
                 return;
             }
 
@@ -266,6 +294,15 @@ public class MainUI extends Application
                     input.get().amount,
                     input.get().description
             );
+            Account fromFresh = accountDAO.getAccountById(input.get().fromAccountId);
+            Account toFresh = accountDAO.getAccountById(input.get().toAccountId);
+
+            if ((fromFresh != null && "CLOSED".equalsIgnoreCase(fromFresh.getStatus())) ||
+                (toFresh != null && "CLOSED".equalsIgnoreCase(toFresh.getStatus()))) {
+                showSimpleAlert("Account closed", "One of the selected accounts is CLOSED and cannot be used.");
+                refreshDashboardData();
+                return;
+            }
 
             if (ok) {
                 refreshDashboardData();
@@ -281,7 +318,118 @@ public class MainUI extends Application
         panel.getChildren().addAll(title, selectorRow, table, actions);
         return panel;
     }
+    //sign up button working.
+    private Node buildSignupScreen() 
+    {
+        BorderPane root = new BorderPane();
+        root.getStyleClass().add("loginRoot");
 
+        activePublicPage = PublicPage.SIGNUP;
+        HBox top = buildTopNavBar();
+        root.setTop(top);
+
+        HBox center = new HBox(24);
+        center.setPadding(new Insets(40));
+        center.setAlignment(Pos.CENTER);
+
+        VBox leftPanel = new VBox(12);
+        leftPanel.getStyleClass().add("heroPanel");
+        leftPanel.setPadding(new Insets(28));
+        leftPanel.setAlignment(Pos.TOP_LEFT);
+        leftPanel.setMinHeight(520);
+
+        Label heroSmall = new Label("Create your account to start using LunarOne Finance");
+        heroSmall.getStyleClass().add("heroSmall");
+
+        Region heroSpacer = new Region();
+        VBox.setVgrow(heroSpacer, Priority.ALWAYS);
+
+        Label heroBig = new Label("Welcome!");
+        heroBig.getStyleClass().add("heroBig");
+
+        leftPanel.getChildren().addAll(heroSmall, heroSpacer, heroBig);
+
+        VBox card = new VBox(12);
+        card.getStyleClass().add("authCard");
+        card.setPadding(new Insets(24));
+        card.setAlignment(Pos.TOP_LEFT);
+        card.setMaxWidth(420);
+
+        Label title = new Label("Sign up");
+        title.getStyleClass().add("authTitle");
+
+        TextField fullName = new TextField();
+        fullName.setPromptText("Full name");
+        fullName.getStyleClass().add("authField");
+
+        TextField emailField = new TextField();
+        emailField.setPromptText("Email");
+        emailField.getStyleClass().add("authField");
+
+        PasswordField pass = new PasswordField();
+        pass.setPromptText("Password");
+        pass.getStyleClass().add("authField");
+
+        PasswordField confirm = new PasswordField();
+        confirm.setPromptText("Confirm password");
+        confirm.getStyleClass().add("authField");
+
+        Label error = new Label("");
+        error.getStyleClass().add("authError");
+        error.setManaged(false);
+        error.setVisible(false);
+
+        Button createBtn = new Button("Create Account");
+        createBtn.getStyleClass().add("authPrimaryBtn");
+        createBtn.setMaxWidth(Double.MAX_VALUE);
+
+        Button backToLogin = new Button("Back to Log in");
+        backToLogin.getStyleClass().add("authSecondaryBtn");
+        backToLogin.setMaxWidth(Double.MAX_VALUE);
+
+        createBtn.setOnAction(e -> {
+            hideError(error);
+
+            String fn = fullName.getText() == null ? "" : fullName.getText().trim();
+            String em = emailField.getText() == null ? "" : emailField.getText().trim();
+            String pw = pass.getText() == null ? "" : pass.getText();
+            String cpw = confirm.getText() == null ? "" : confirm.getText();
+
+            if (fn.length() < 2) { showError(error, "Please enter a valid full name."); return; }
+            if (!EMAIL_PATTERN.matcher(em).matches()) { showError(error, "Please enter a valid email address."); return; }
+            if (pw.length() < 8) { showError(error, "Password must be at least 8 characters."); return; }
+            if (!pw.equals(cpw)) { showError(error, "Passwords do not match."); return; }
+
+            User existing = userDAO.getUserByEmail(em);
+            if (existing != null) {
+                showError(error, "An account with this email already exists. Please log in.");
+                return;
+            }
+
+            boolean ok = userDAO.createUser(new User(fn, em, pw));
+            if (!ok) {
+                showError(error, "Signup failed. Please try again.");
+                return;
+            }
+
+            Alert a = new Alert(Alert.AlertType.INFORMATION);
+            a.setHeaderText("Account created ✅");
+            a.setContentText("Your account has been created. Please log in.");
+            a.showAndWait();
+
+            showPublicPage(PublicPage.LOGIN);
+        });
+
+        backToLogin.setOnAction(e -> showPublicPage(PublicPage.LOGIN));
+
+        card.getChildren().addAll(title, fullName, emailField, pass, confirm, error, createBtn, new Separator(), backToLogin);
+
+        HBox.setHgrow(leftPanel, Priority.ALWAYS);
+        center.getChildren().addAll(leftPanel, card);
+
+        root.setCenter(center);
+        return root;
+    }
 
     private String money(BigDecimal value) 
     {
@@ -447,44 +595,7 @@ public class MainUI extends Application
         passField.setOnAction(e -> loginBtn.fire());
 
         // ---- SIGNUP ACTION (REAL DAO) ----
-        signupBtn.setOnAction(e -> {
-            hideError(error);
-
-            Optional<User> created = showSignupDialog();
-            if (created.isEmpty()) return;
-
-            User newUser = created.get();
-
-            // Check duplicate email
-            if (!EMAIL_PATTERN.matcher(newUser.getEmail()).matches()) {
-                showError(error, "Invalid email format. Signup cancelled.");
-                return;
-            }
-
-            User existing = userDAO.getUserByEmail(newUser.getEmail());
-            if (existing != null) {
-                showError(error, "An account with this email already exists. Please login.");
-                // pre-fill email for convenience
-                emailField.setText(newUser.getEmail());
-                passField.clear();
-                return;
-            }
-
-            boolean createdOk = userDAO.createUser(newUser);
-            if (!createdOk) {
-                showError(error, "Signup failed. Please try again (or check DB connection).");
-                return;
-            }
-
-            // Success: prefill email, clear password
-            Alert a = new Alert(Alert.AlertType.INFORMATION);
-            a.setHeaderText("Account created ✅");
-            a.setContentText("Your account has been created. Please login.");
-            a.showAndWait();
-
-            emailField.setText(newUser.getEmail());
-            passField.clear();
-        });
+        signupBtn.setOnAction(e -> showPublicPage(PublicPage.SIGNUP));
 
         loginCard.getChildren().addAll(
                 title, subtitle,
@@ -665,7 +776,6 @@ public class MainUI extends Application
         logout.getStyleClass().add("ghostBtn");
         logout.setOnAction(e -> {
             loggedInUser = null;
-            activePublicPage = PublicPage.LOGIN;
             sceneRoot.getChildren().setAll(buildLoginScreen());
         });
 
@@ -676,6 +786,13 @@ public class MainUI extends Application
         top.getStyleClass().add("topBar");
         top.setPadding(new Insets(14, 18, 14, 18));
         return top;
+    }
+    private List<Account> activeAccountsOnly(List<Account> list) 
+    {
+        if (list == null) return List.of();
+        return list.stream()
+                .filter(a -> a != null && a.getStatus() != null && !"CLOSED".equalsIgnoreCase(a.getStatus()))
+                .toList();
     }
 
     private VBox buildSidebar() {
@@ -752,40 +869,33 @@ public class MainUI extends Application
         Label title = new Label("Your Accounts");
         title.getStyleClass().add("panelTitle");
 
-        // Table
-        TableView<Account> table = new TableView<>();
-        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
-        table.setFixedCellSize(40);
-        VBox.setVgrow(table, Priority.ALWAYS);
+        // ---------- Accounts table ----------
+        TableView<Account> accountsTable = new TableView<>();
+        accountsTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        accountsTable.setFixedCellSize(40);
 
         TableColumn<Account, String> colNum = new TableColumn<>("Account #");
         colNum.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().getAccountNumber()));
 
-        TableColumn<Account, String> colType = new TableColumn<>("Type");
-        colType.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().getAccountType()));
+        //TableColumn<Account, String> colType = new TableColumn<>("Type");
+        //colType.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().getAccountType()));
 
         TableColumn<Account, String> colBal = new TableColumn<>("Balance");
         colBal.setCellValueFactory(d -> new SimpleStringProperty(money(d.getValue().getBalance())));
 
-        TableColumn<Account, String> colStatus = new TableColumn<>("Status");
-        colStatus.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().getStatus()));
+        //TableColumn<Account, String> colStatus = new TableColumn<>("Status");
+        //colStatus.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().getStatus()));
 
-        table.getColumns().addAll(colNum, colType, colBal, colStatus);
+        accountsTable.getColumns().addAll(colNum, colBal);
 
-        Runnable reload = () -> {
-            if (loggedInUser == null) return;
-            userAccounts = accountDAO.getAccountsByUserId(loggedInUser.getUserId());
-            table.setItems(FXCollections.observableArrayList(userAccounts));
-        };
-        reload.run();
-
-        // Create account controls
+        // ---------- Create account (compact row) ----------
         ComboBox<String> typeBox = new ComboBox<>();
         typeBox.setItems(FXCollections.observableArrayList("CHEQUING", "SAVINGS"));
         typeBox.setValue("CHEQUING");
 
         TextField initialBalance = new TextField("0.00");
         initialBalance.setPromptText("Initial balance");
+        initialBalance.setPrefWidth(120);
 
         Button createBtn = new Button("Create Account");
         createBtn.getStyleClass().add("primaryBtn");
@@ -806,7 +916,6 @@ public class MainUI extends Application
             }
 
             String accNumber = accountDAO.generateAccountNumber();
-
             Account acc = new Account(
                     loggedInUser.getUserId(),
                     accNumber,
@@ -814,6 +923,22 @@ public class MainUI extends Application
                     bal,
                     "ACTIVE"
             );
+
+            // Confirmation (NEW)
+            Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+            confirm.setHeaderText("Confirm account creation");
+            confirm.setContentText("Are you sure you want to create a " + typeBox.getValue()
+                    + " account with initial balance " + money(bal) + "?");
+
+            ButtonType yes = new ButtonType("Yes", ButtonBar.ButtonData.YES);
+            ButtonType no = new ButtonType("No", ButtonBar.ButtonData.NO);
+            confirm.getButtonTypes().setAll(yes, no);
+
+            Optional<ButtonType> result = confirm.showAndWait();
+            if (result.isEmpty() || result.get() == no) {
+                showSimpleAlert("Declined", "Account creation cancelled.");
+                return;
+            }
 
             boolean ok = accountDAO.createAccount(acc);
             if (!ok) {
@@ -823,7 +948,6 @@ public class MainUI extends Application
 
             showSimpleAlert("Success ✅", "Account created: " + accNumber);
             refreshDashboardData();
-            reload.run();
         });
 
         HBox createRow = new HBox(10,
@@ -833,13 +957,346 @@ public class MainUI extends Application
         );
         createRow.setAlignment(Pos.CENTER_LEFT);
 
-        VBox card = new VBox(12, title, createRow, table);
-        card.getStyleClass().add("panel");
-        card.setPadding(new Insets(16));
-        VBox.setVgrow(card, Priority.ALWAYS);
+        VBox createCard = new VBox(12, title, createRow);
+        createCard.getStyleClass().add("panel");
+        createCard.setPadding(new Insets(14)); // smaller section
 
-        wrapper.getChildren().add(card);
+        // ---------- Transactions viewer ----------
+        Label txTitle = new Label("Account Transactions");
+        txTitle.getStyleClass().add("panelTitle");
+
+        ComboBox<Account> accountSelector = new ComboBox<>();
+        accountSelector.setItems(FXCollections.observableArrayList(userAccounts == null ? List.of() : userAccounts));
+        accountSelector.setCellFactory(cb -> new ListCell<>() {
+            @Override protected void updateItem(Account a, boolean empty) {
+                super.updateItem(a, empty);
+                setText(empty || a == null ? "" : a.getAccountNumber() + " (" + a.getAccountType() + ")");
+            }
+        });
+        accountSelector.setButtonCell(accountSelector.getCellFactory().call(null));
+
+        // Choose default selection:
+        Account defaultAcc = null;
+        if (accountsPageSelectedAccountId != null) {
+            defaultAcc = findAccountById(accountsPageSelectedAccountId);
+        }
+        if (defaultAcc == null && userAccounts != null && !userAccounts.isEmpty()) {
+            defaultAcc = userAccounts.get(0);
+        }
+        accountSelector.setValue(defaultAcc);
+
+        // Transactions table
+        TableView<TxRow> txTable = new TableView<>();
+        txTable.getStyleClass().add("txTable");
+        txTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        txTable.setFixedCellSize(40);
+        VBox.setVgrow(txTable, Priority.ALWAYS);
+
+        TableColumn<TxRow, String> tDate = new TableColumn<>("Date/Time");
+        tDate.setCellValueFactory(d -> d.getValue().dateTime);
+
+        TableColumn<TxRow, String> tType = new TableColumn<>("Type");
+        tType.setCellValueFactory(d -> d.getValue().type);
+
+        TableColumn<TxRow, String> tAmt = new TableColumn<>("Amount");
+        tAmt.setCellValueFactory(d -> d.getValue().amount);
+
+        TableColumn<TxRow, String> tDesc = new TableColumn<>("Description");
+        tDesc.setCellValueFactory(d -> d.getValue().desc);
+
+        txTable.getColumns().addAll(tDate, tType, tAmt, tDesc);
+
+        Runnable reloadTx = () -> {
+            Account selected = accountSelector.getValue();
+            if (selected == null) {
+                txTable.setItems(FXCollections.observableArrayList(
+                        new TxRow("-","INFO", "$0.00", "No account selected")
+                ));
+                return;
+            }
+
+            List<Transaction> txs = transactionDAO.getTransactionsByAccountId(selected.getAccountId());
+            txs.sort(Comparator.comparing(Transaction::getCreatedAt).reversed());
+
+            var rows = FXCollections.<TxRow>observableArrayList();
+            for (Transaction t : txs) {
+                rows.add(new TxRow(
+                        formatTxTime(t.getCreatedAt()),
+                        safe(t.getTransactionType()),
+                        money(t.getAmount()),
+                        safe(t.getDescription())
+                ));
+            }
+            if (rows.isEmpty()) rows.add(new TxRow("-", "INFO", "$0.00", "No transactions yet"));
+            txTable.setItems(rows);
+        };
+
+        reloadTx.run();
+        accountSelector.valueProperty().addListener((obs, o, n) -> reloadTx.run());
+
+        // Sync: clicking an account row should also switch the selector
+        accountsTable.getSelectionModel().selectedItemProperty().addListener((obs, o, n) -> {
+            if (n != null) accountSelector.setValue(n);
+        });
+
+        // ---------- Dashboard card selection controls (NEW) ----------
+        Label cardMapTitle = new Label("Dashboard Card Accounts");
+        cardMapTitle.getStyleClass().add("panelTitle");
+
+        ComboBox<Account> cheqCardBox = new ComboBox<>(accountSelector.getItems());
+        ComboBox<Account> savCardBox = new ComboBox<>(accountSelector.getItems());
+        cheqCardBox.setCellFactory(accountSelector.getCellFactory());
+        savCardBox.setCellFactory(accountSelector.getCellFactory());
+        cheqCardBox.setButtonCell(cheqCardBox.getCellFactory().call(null));
+        savCardBox.setButtonCell(savCardBox.getCellFactory().call(null));
+
+        // Load existing selected card accounts if set
+        cheqCardBox.setValue(findAccountById(dashboardChequingAccountId));
+        savCardBox.setValue(findAccountById(dashboardSavingsAccountId));
+
+        Button saveCardMap = new Button("Save");
+        saveCardMap.getStyleClass().add("secondaryBtn");
+        saveCardMap.setOnAction(e -> {
+            Account c = cheqCardBox.getValue();
+            Account s = savCardBox.getValue();
+            dashboardChequingAccountId = (c != null) ? c.getAccountId() : null;
+            dashboardSavingsAccountId = (s != null) ? s.getAccountId() : null;
+
+            showSimpleAlert("Saved", "Dashboard card accounts updated.");
+            refreshDashboardData();
+        });
+
+        Runnable reloadAccounts = () -> {
+            if (loggedInUser == null) return;
+
+            // load all from DB
+            userAccounts = accountDAO.getAccountsByUserId(loggedInUser.getUserId());
+
+            // filter ACTIVE only for UI lists
+            List<Account> active = activeAccountsOnly(userAccounts);
+
+            accountsTable.setItems(FXCollections.observableArrayList(active));
+
+            // IMPORTANT: keep selector list in sync too
+            accountSelector.setItems(FXCollections.observableArrayList(active));
+            cheqCardBox.setItems(FXCollections.observableArrayList(active));
+            savCardBox.setItems(FXCollections.observableArrayList(active));
+
+            // keep current selection valid
+            Account selected = accountSelector.getValue();
+            if (selected == null || "CLOSED".equalsIgnoreCase(selected.getStatus())) {
+                accountSelector.setValue(active.isEmpty() ? null : active.get(0));
+            }
+        };
+        reloadAccounts.run();
+        HBox cardMapRow = new HBox(10,
+                new Label("Chequing card:"), cheqCardBox,
+                new Label("Savings card:"), savCardBox,
+                saveCardMap
+        );
+        cardMapRow.setAlignment(Pos.CENTER_LEFT);
+
+        // ---------- close account button (NEW) ----------
+        Button closeAccountBtn = new Button("Close Account");
+        closeAccountBtn.getStyleClass().add("secondaryBtn");
+
+        closeAccountBtn.setOnAction(e -> {
+            Account selected = accountSelector.getValue(); // or accountsTable selection
+            if (selected == null) {
+                showSimpleAlert("No account", "Select an account first.");
+                return;
+            }
+
+            // Refresh the latest balance from DB (safe)
+            userAccounts = accountDAO.getAccountsByUserId(loggedInUser.getUserId());
+            Account fresh = null;
+            for (Account a : userAccounts) {
+                if (a.getAccountId() == selected.getAccountId()) { fresh = a; break; }
+            }
+            if (fresh == null) fresh = selected;
+
+            if (fresh.getBalance() != null && fresh.getBalance().compareTo(BigDecimal.ZERO) != 0) {
+                Alert a = new Alert(Alert.AlertType.WARNING);
+                a.setHeaderText("Cannot close account");
+                a.setContentText(
+                        "This account still has funds (" + money(fresh.getBalance()) + ").\n\n" +
+                        "Please transfer or withdraw the funds first so the balance becomes $0.00, then try again."
+                );
+                a.showAndWait();
+                return;
+            }
+
+            Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+            confirm.setHeaderText("Confirm account closure");
+            confirm.setContentText("Are you sure you want to close account:\n\n" + fresh.getAccountNumber() + " ?");
+            ButtonType yes = new ButtonType("Yes", ButtonBar.ButtonData.YES);
+            ButtonType no = new ButtonType("No", ButtonBar.ButtonData.NO);
+            confirm.getButtonTypes().setAll(yes, no);
+
+            Optional<ButtonType> res = confirm.showAndWait();
+            if (res.isEmpty() || res.get() == no) {
+                showSimpleAlert("Declined", "Account closure cancelled.");
+                return;
+            }
+
+            boolean ok = accountDAO.closeAccount(fresh.getAccountId()); // we’ll add this method if missing
+            if (!ok) {
+                showSimpleAlert("Failed", "Account could not be closed. Check DB.");
+                return;
+            }
+
+            showSimpleAlert("Closed ✅", "Account closed: " + fresh.getAccountNumber());
+            accountsPageSelectedAccountId = null; // prevent selecting a closed one again
+            reloadAccounts.run();                 // refresh accounts list + selector
+            reloadTx.run();                       // refresh transactions panel
+            refreshDashboardData();               // update dashboard cards/balances
+
+            // refresh UI
+            refreshDashboardData();
+            // reload accounts + selector + tx
+            // (call your reloadAccounts() and reloadTx() runnables if you have them)
+        });
+
+        // ---------- PDF Statement download (NEW) ----------
+        Button downloadPdf = new Button("Download Statement (PDF)");
+        downloadPdf.getStyleClass().add("secondaryBtn");
+
+        downloadPdf.setOnAction(e -> {
+            Account selected = accountSelector.getValue();
+            if (selected == null) {
+                showSimpleAlert("No account", "Select an account first.");
+                return;
+            }
+            downloadStatementPdf(selected);
+        });
+
+        HBox txTopRow = new HBox(12,
+            new Label("Account:"), accountSelector,
+            new Region(),
+            downloadPdf,
+            closeAccountBtn
+        );
+
+        HBox.setHgrow(txTopRow.getChildren().get(2), Priority.ALWAYS);
+        txTopRow.setAlignment(Pos.CENTER_LEFT);
+
+        VBox txCard = new VBox(12, txTitle, txTopRow, txTable, cardMapTitle, cardMapRow);
+        txCard.getStyleClass().add("panel");
+        txCard.setPadding(new Insets(16));
+        VBox.setVgrow(txCard, Priority.ALWAYS);
+
+        // Layout: createCard on top, then accounts table + tx panel
+        HBox bottom = new HBox(16);
+
+        VBox accountsCard = new VBox(12, new Label("Accounts List"), accountsTable);
+        accountsCard.getStyleClass().add("panel");
+        accountsCard.setPadding(new Insets(16));
+        VBox.setVgrow(accountsTable, Priority.ALWAYS);
+
+        HBox.setHgrow(accountsCard, Priority.ALWAYS);
+        HBox.setHgrow(txCard, Priority.ALWAYS);
+
+        bottom.getChildren().addAll(accountsCard, txCard);
+        VBox.setVgrow(bottom, Priority.ALWAYS);
+
+        wrapper.getChildren().addAll(createCard, bottom);
         return wrapper;
+    }
+
+    private void downloadStatementPdf(Account account) 
+    {
+        try {
+            // choose file location
+            javafx.stage.FileChooser chooser = new javafx.stage.FileChooser();
+            chooser.setTitle("Save Statement PDF");
+            chooser.getExtensionFilters().add(new javafx.stage.FileChooser.ExtensionFilter("PDF Files", "*.pdf"));
+            chooser.setInitialFileName("Statement_" + account.getAccountNumber() + ".pdf");
+
+            java.io.File file = chooser.showSaveDialog(stage);
+            if (file == null) return;
+
+            List<Transaction> txs = transactionDAO.getTransactionsByAccountId(account.getAccountId());
+            txs.sort(Comparator.comparing(Transaction::getCreatedAt).reversed());
+
+            // PDFBox
+            org.apache.pdfbox.pdmodel.PDDocument doc = new org.apache.pdfbox.pdmodel.PDDocument();
+            org.apache.pdfbox.pdmodel.PDPage page = new org.apache.pdfbox.pdmodel.PDPage();
+            doc.addPage(page);
+
+            org.apache.pdfbox.pdmodel.PDPageContentStream cs =
+                    new org.apache.pdfbox.pdmodel.PDPageContentStream(doc, page);
+
+            float y = 750;
+
+            cs.beginText();
+            cs.setFont(org.apache.pdfbox.pdmodel.font.PDType1Font.HELVETICA_BOLD, 18);
+            cs.newLineAtOffset(50, y);
+            cs.showText("LunarOne Finance - Account Statement");
+            cs.endText();
+
+            y -= 30;
+
+            cs.beginText();
+            cs.setFont(org.apache.pdfbox.pdmodel.font.PDType1Font.HELVETICA, 12);
+            cs.newLineAtOffset(50, y);
+            cs.showText("Account: " + account.getAccountNumber() + " (" + account.getAccountType() + ")");
+            cs.endText();
+
+            y -= 18;
+
+            cs.beginText();
+            cs.setFont(org.apache.pdfbox.pdmodel.font.PDType1Font.HELVETICA, 12);
+            cs.newLineAtOffset(50, y);
+            cs.showText("Current Balance: " + money(account.getBalance()));
+            cs.endText();
+
+            y -= 28;
+
+            // table header
+            cs.beginText();
+            cs.setFont(org.apache.pdfbox.pdmodel.font.PDType1Font.HELVETICA_BOLD, 12);
+            cs.newLineAtOffset(50, y);
+            cs.showText("Type");
+            cs.newLineAtOffset(120, 0);
+            cs.showText("Amount");
+            cs.newLineAtOffset(120, 0);
+            cs.showText("Description");
+            cs.endText();
+
+            y -= 18;
+
+            cs.setFont(org.apache.pdfbox.pdmodel.font.PDType1Font.HELVETICA, 11);
+
+            for (Transaction t : txs) {
+                if (y < 60) break; // keep simple: one page for now
+
+                String type = safe(t.getTransactionType());
+                String amt = money(t.getAmount());
+                String desc = safe(t.getDescription());
+                if (desc.length() > 45) desc = desc.substring(0, 45) + "...";
+
+                cs.beginText();
+                cs.newLineAtOffset(50, y);
+                cs.showText(type);
+                cs.newLineAtOffset(120, 0);
+                cs.showText(amt);
+                cs.newLineAtOffset(120, 0);
+                cs.showText(desc);
+                cs.endText();
+
+                y -= 16;
+            }
+
+            cs.close();
+            doc.save(file);
+            doc.close();
+
+            showSimpleAlert("Saved ✅", "Statement saved to:\n" + file.getAbsolutePath());
+
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            showSimpleAlert("Error", "Could not generate PDF statement.");
+        }
     }
 
     private Button navButton(String text) {
@@ -897,8 +1354,16 @@ public class MainUI extends Application
         wrapper.setPadding(new Insets(18));
         wrapper.getStyleClass().add("pageWrapper");
 
-        Account chequing = pickAccountForCard("CHEQUING", "CHECKING", "CHEQUING ACCOUNT");
-        Account savings  = pickAccountForCard("SAVINGS", "SAVING");
+        /*Account chequing = pickAccountForCard("CHEQUING", "CHECKING", "CHEQUING ACCOUNT");
+        Account savings  = pickAccountForCard("SAVINGS", "SAVING");*/
+
+        Account chequing = (dashboardChequingAccountId != null)
+        ? findAccountById(dashboardChequingAccountId)
+        : pickAccountForCard("CHEQUING", "CHECKING", "CHEQUING ACCOUNT");
+
+        Account savings = (dashboardSavingsAccountId != null)
+        ? findAccountById(dashboardSavingsAccountId)
+        : pickAccountForCard("SAVINGS", "SAVING");
 
         // Fallbacks if account_type naming isn't exactly matching
         if (chequing == null && userAccounts != null && userAccounts.size() >= 1) chequing = userAccounts.get(0);
@@ -910,10 +1375,10 @@ public class MainUI extends Application
         // Credit is dummy for now (until you add a credit/limit table/column)
         BigDecimal creditLimit = new BigDecimal("5000.00");
 
-        HBox cardsRow = new HBox(16,
-                balanceCard("Chequing", money(chequingBal), "Total Balance"),
-                balanceCard("Savings",  money(savingsBal),  "Total Balance"),
-                balanceCard("Credit",   money(creditLimit), "Available Credit")
+       HBox cardsRow = new HBox(16,
+        balanceCard("Chequing", chequing, money(chequingBal), "Total Balance"),
+        balanceCard("Savings",  savings,  money(savingsBal),  "Total Balance"),
+        balanceCard("Credit",   null,     money(creditLimit), "Available Credit")
         );
         for (var n : cardsRow.getChildren()) HBox.setHgrow(n, Priority.ALWAYS);
 
@@ -935,7 +1400,8 @@ public class MainUI extends Application
         return wrapper;
     }
 
-    private Pane balanceCard(String title, String amount, String sub) {
+    private Pane balanceCard(String title, Account accOrNull, String amount, String sub) 
+    {
         VBox card = new VBox(6);
         card.getStyleClass().add("balanceCard");
         card.setPadding(new Insets(16));
@@ -944,13 +1410,28 @@ public class MainUI extends Application
         Label t = new Label(title);
         t.getStyleClass().add("cardTitle");
 
+        // NEW: show account number
+        Label accNum = new Label(accOrNull != null ? accOrNull.getAccountNumber() : "—");
+        accNum.getStyleClass().add("cardAccountNumber");
+
         Label a = new Label(amount);
         a.getStyleClass().add("cardAmount");
 
         Label s = new Label(sub);
         s.getStyleClass().add("cardSub");
 
-        card.getChildren().addAll(t, a, s);
+        card.getChildren().addAll(t, accNum, a, s);
+
+        // NEW: Make card clickable ONLY if we have a real account
+        if (accOrNull != null) {
+            card.getStyleClass().add("clickableCard");
+            card.setOnMouseClicked(e -> {
+                accountsPageSelectedAccountId = accOrNull.getAccountId();
+                pageTitle.setText("Accounts");
+                appRoot.setCenter(buildAccountsPage());
+            });
+        }
+
         return card;
     }
 
@@ -989,7 +1470,8 @@ public class MainUI extends Application
         return panel;
     }
 
-    private VBox buildTransactionsPanelBox() {
+    private VBox buildTransactionsPanelBox() 
+    {
         VBox panel = new VBox(12);
         panel.getStyleClass().add("panel");
         panel.setPadding(new Insets(16));
@@ -1003,6 +1485,10 @@ public class MainUI extends Application
         table.setFixedCellSize(40);
         VBox.setVgrow(table, Priority.ALWAYS);
 
+        // NEW: Date/Time column
+        TableColumn<TxRow, String> colDate = new TableColumn<>("Date/Time");
+        colDate.setCellValueFactory(d -> d.getValue().dateTime);
+
         TableColumn<TxRow, String> colType = new TableColumn<>("Type");
         colType.setCellValueFactory(d -> d.getValue().type);
 
@@ -1012,12 +1498,12 @@ public class MainUI extends Application
         TableColumn<TxRow, String> colDesc = new TableColumn<>("Description");
         colDesc.setCellValueFactory(d -> d.getValue().desc);
 
-        table.getColumns().addAll(colType, colAmt, colDesc);
+        table.getColumns().setAll(colDate, colType, colAmt, colDesc);
 
         table.setItems(FXCollections.observableArrayList(
-                new TxRow("DEPOSIT", "$1000.00", "Learning deposit"),
-                new TxRow("WITHDRAW", "$300.00", "Test withdrawal"),
-                new TxRow("TRANSFER", "$200.00", "To Savings account")
+                new TxRow("2025-12-14 10:00", "DEPOSIT", "$1000.00", "Learning deposit"),
+                new TxRow("2025-12-14 10:10", "WITHDRAW", "$300.00", "Test withdrawal"),
+                new TxRow("2025-12-14 10:20", "TRANSFER", "$200.00", "To Savings account")
         ));
 
         Button deposit = new Button("Deposit");
@@ -1036,15 +1522,37 @@ public class MainUI extends Application
         return panel;
     }
 
-    private static class TxRow {
+
+    private static class TxRow 
+    {
+        final SimpleStringProperty dateTime = new SimpleStringProperty();
         final SimpleStringProperty type = new SimpleStringProperty();
         final SimpleStringProperty amount = new SimpleStringProperty();
         final SimpleStringProperty desc = new SimpleStringProperty();
 
-        TxRow(String t, String a, String d) {
+        TxRow(String dt, String t, String a, String d) {
+            dateTime.set(dt);
             type.set(t);
             amount.set(a);
             desc.set(d);
+        }
+    }
+
+    private String formatTxTime(Object createdAt) 
+    {
+        if (createdAt == null) return "-";
+        try {
+            // If your Transaction.getCreatedAt() returns java.sql.Timestamp:
+            if (createdAt instanceof java.sql.Timestamp ts) {
+                return ts.toLocalDateTime().toString().replace('T', ' ');
+            }
+            // If it returns java.time.LocalDateTime:
+            if (createdAt instanceof java.time.LocalDateTime ldt) {
+                return ldt.toString().replace('T', ' ');
+            }
+            return createdAt.toString();
+        } catch (Exception e) {
+            return String.valueOf(createdAt);
         }
     }
 
@@ -1144,8 +1652,8 @@ public class MainUI extends Application
 
         ComboBox<Account> fromBox = new ComboBox<>();
         ComboBox<Account> toBox = new ComboBox<>();
-        fromBox.setItems(FXCollections.observableArrayList(userAccounts));
-        toBox.setItems(FXCollections.observableArrayList(userAccounts));
+        fromBox.setItems(FXCollections.observableArrayList(activeAccountsOnly(userAccounts)));
+        toBox.setItems(FXCollections.observableArrayList(activeAccountsOnly(userAccounts)));
 
         fromBox.setCellFactory(cb -> new ListCell<>() {
             @Override protected void updateItem(Account a, boolean empty) {
@@ -1241,6 +1749,8 @@ public class MainUI extends Application
             case ABOUT -> sceneRoot.getChildren().setAll(buildPublicShell("About Us"));
             case CONTACT -> sceneRoot.getChildren().setAll(buildPublicShell("Contact"));
             case LOGIN -> sceneRoot.getChildren().setAll(buildLoginScreen()); // your existing screen
+            case SIGNUP -> sceneRoot.getChildren().setAll(buildSignupScreen());
+
         }
     }
 

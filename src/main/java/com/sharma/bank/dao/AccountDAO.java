@@ -178,4 +178,22 @@ public class AccountDAO
         }
     }
 
+    public boolean closeAccount(int accountId)
+    {
+        String sql = "UPDATE accounts SET status = 'CLOSED' WHERE account_id = ? AND balance = 0";
+
+        try (Connection conn = DBConnection.getConnection();
+            PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setInt(1, accountId);
+
+            int rows = stmt.executeUpdate();
+            return rows > 0;
+
+        } catch (SQLException e) {
+            System.out.println("ERROR CLOSING ACCOUNT:");
+            e.printStackTrace();
+            return false;
+        }
+    }
 }
