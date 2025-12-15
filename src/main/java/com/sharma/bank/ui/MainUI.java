@@ -1,7 +1,11 @@
 package com.sharma.bank.ui;
-
+import com.sharma.bank.dao.AccountDAO;
+import com.sharma.bank.dao.TransactionDAO;
 import com.sharma.bank.dao.UserDAO;
+import com.sharma.bank.model.Account;
 import com.sharma.bank.model.User;
+import com.sharma.bank.model.Transaction;
+import com.sharma.bank.service.BankingService;
 import javafx.application.Application;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
@@ -17,10 +21,14 @@ import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.stage.Stage;
 
+import java.math.BigDecimal;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
-public class MainUI extends Application {
+public class MainUI extends Application 
+{
 
     private Stage stage;
     private Scene scene;
@@ -41,6 +49,12 @@ public class MainUI extends Application {
     // DAO
     private final UserDAO userDAO = new UserDAO();
 
+    private final AccountDAO accountDAO = new AccountDAO();
+    private final TransactionDAO transactionDAO = new TransactionDAO();
+
+    private List<Account> userAccounts;   // accounts of the logged-in user
+    
+    private final BankingService bankingService = new BankingService();
     // Keep logged-in user (use later to load accounts/transactions)
     private User loggedInUser;
 
@@ -49,7 +63,8 @@ public class MainUI extends Application {
             Pattern.compile("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+$");
 
     @Override
-    public void start(Stage stage) {
+    public void start(Stage stage) 
+    {
         this.stage = stage;
 
         sceneRoot = new StackPane();
@@ -75,11 +90,211 @@ public class MainUI extends Application {
         stage.show();
     }
 
+
+    private Account pickAccountForCard(String... typeKeywords) 
+    {
+        if (userAccounts == null) return null;
+
+        for (Account a : userAccounts) {
+            if (a.getAccountType() == null) continue;
+            String t = a.getAccountType().toUpperCase().trim();
+
+            for (String k : typeKeywords) {
+                if (t.contains(k.toUpperCase())) {
+                    return a;
+                }
+            }
+        }
+        return null;
+    }
+
+
+    private VBox buildTransactionsPanelReal(Account chequing, Account savings) 
+    {
+        VBox panel = new VBox(12);
+        panel.getStyleClass().add("panel");
+        panel.setPadding(new Insets(16));
+
+        Label title = new Label("Recent Transactions");
+        title.getStyleClass().add("panelTitle");
+
+        // -------------------------
+        // Account selector (NEW)
+        // -------------------------
+        ComboBox<Account> accountBox = new ComboBox<>();
+        accountBox.setItems(FXCollections.observableArrayList(userAccounts == null ? List.of() : userAccounts));
+
+        accountBox.setCellFactory(cb -> new ListCell<>() {
+            @Override protected void updateItem(Account a, boolean empty) {
+                super.updateItem(a, empty);
+                setText(empty || a == null ? "" : a.getAccountNumber() + " (" + a.getAccountType() + ")");
+            }
+        });
+        accountBox.setButtonCell(accountBox.getCellFactory().call(null));
+
+        // Default selection: Chequing if exists else first account
+        Account defaultAcc = chequing != null ? chequing
+                : (userAccounts != null && !userAccounts.isEmpty() ? userAccounts.get(0) : null);
+        accountBox.setValue(defaultAcc);
+
+        HBox selectorRow = new HBox(10, new Label("Account:"), accountBox);
+        selectorRow.setAlignment(Pos.CENTER_LEFT);
+        selectorRow.getStyleClass().add("accountSelectorRow");
+
+        // -------------------------
+        // Transactions table
+        // -------------------------
+        TableView<TxRow> table = new TableView<>();
+        table.getStyleClass().add("txTable");
+        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        table.setFixedCellSize(40);
+        VBox.setVgrow(table, Priority.ALWAYS);
+
+        TableColumn<TxRow, String> colType = new TableColumn<>("Type");
+        colType.setCellValueFactory(d -> d.getValue().type);
+
+        TableColumn<TxRow, String> colAmt = new TableColumn<>("Amount");
+        colAmt.setCellValueFactory(d -> d.getValue().amount);
+
+        TableColumn<TxRow, String> colDesc = new TableColumn<>("Description");
+        colDesc.setCellValueFactory(d -> d.getValue().desc);
+
+        table.getColumns().addAll(colType, colAmt, colDesc);
+
+        Runnable reloadTable = () -> {
+            Account selected = accountBox.getValue();
+            if (selected == null) {
+                table.setItems(FXCollections.observableArrayList(
+                        new TxRow("INFO", "$0.00", "No account selected")
+                ));
+                return;
+            }
+
+            List<Transaction> txs = transactionDAO.getTransactionsByAccountId(selected.getAccountId());
+            txs.sort(Comparator.comparing(Transaction::getCreatedAt).reversed());
+
+            var rows = FXCollections.<TxRow>observableArrayList();
+            for (int i = 0; i < Math.min(10, txs.size()); i++) {
+                Transaction t = txs.get(i);
+                rows.add(new TxRow(
+                        safe(t.getTransactionType()),
+                        money(t.getAmount()),
+                        safe(t.getDescription())
+                ));
+            }
+
+            if (rows.isEmpty()) {
+                rows.add(new TxRow("INFO", "$0.00", "No transactions yet"));
+            }
+
+            table.setItems(rows);
+        };
+
+        // load once
+        reloadTable.run();
+
+        // reload when user changes account
+        accountBox.valueProperty().addListener((obs, o, n) -> reloadTable.run());
+
+        // -------------------------
+        // Action buttons
+        // -------------------------
+        Button depositBtn = new Button("Deposit");
+        depositBtn.getStyleClass().add("primaryBtn");
+
+        Button withdrawBtn = new Button("Withdraw");
+        withdrawBtn.getStyleClass().add("secondaryBtn");
+
+        Button transferBtn = new Button("Transfer");
+        transferBtn.getStyleClass().add("secondaryBtn");
+
+        depositBtn.setOnAction(e -> {
+            Account selected = accountBox.getValue();
+            if (selected == null) {
+                showSimpleAlert("No account", "Select an account first.");
+                return;
+            }
+
+            Optional<TxInput> input = showAmountDialog("Deposit", "Enter deposit amount + description");
+            if (input.isEmpty()) return;
+
+            boolean ok = bankingService.deposit(selected.getAccountId(), input.get().amount, input.get().description);
+            if (ok) {
+                refreshDashboardData();
+                reloadTable.run();
+            } else {
+                showSimpleAlert("Deposit failed", "Deposit did not complete.");
+            }
+        });
+
+        withdrawBtn.setOnAction(e -> {
+            Account selected = accountBox.getValue();
+            if (selected == null) {
+                showSimpleAlert("No account", "Select an account first.");
+                return;
+            }
+
+            Optional<TxInput> input = showAmountDialog("Withdraw", "Enter withdrawal amount + description");
+            if (input.isEmpty()) return;
+
+            boolean ok = bankingService.withdraw(selected.getAccountId(), input.get().amount, input.get().description);
+            if (ok) {
+                refreshDashboardData();
+                reloadTable.run();
+            } else {
+                showSimpleAlert("Withdrawal failed", "Not enough funds or system error.");
+            }
+        });
+
+        transferBtn.setOnAction(e -> {
+            if (userAccounts == null || userAccounts.size() < 2) {
+                showSimpleAlert("Transfer not possible", "You need at least 2 accounts to test transfer.");
+                return;
+            }
+
+            Optional<TransferInput> input = showTransferDialog();
+            if (input.isEmpty()) return;
+
+            boolean ok = bankingService.transfer(
+                    input.get().fromAccountId,
+                    input.get().toAccountId,
+                    input.get().amount,
+                    input.get().description
+            );
+
+            if (ok) {
+                refreshDashboardData();
+                reloadTable.run();
+            } else {
+                showSimpleAlert("Transfer failed", "Transfer did not complete.");
+            }
+        });
+
+        HBox actions = new HBox(10, depositBtn, withdrawBtn, transferBtn);
+        actions.setAlignment(Pos.CENTER_RIGHT);
+
+        panel.getChildren().addAll(title, selectorRow, table, actions);
+        return panel;
+    }
+
+
+    private String money(BigDecimal value) 
+    {
+        if (value == null) value = BigDecimal.ZERO;
+        return "$" + value.setScale(2, BigDecimal.ROUND_HALF_UP);
+    }
+
+
+    private String safe(String s) 
+    {
+        return (s == null || s.isBlank()) ? "-" : s;
+    }
     /* =========================
        LOGIN SCREEN (CONNECTED)
        ========================= */
 
-    private Node buildLoginScreen() {
+    private Node buildLoginScreen() 
+    {
         BorderPane root = new BorderPane();
         root.getStyleClass().add("loginRoot");
 
@@ -206,7 +421,18 @@ public class MainUI extends Application {
 
             // ✅ SUCCESS
             loggedInUser = user;
+
+            // Load accounts for this user right away
+            userAccounts = accountDAO.getAccountsByUserId(loggedInUser.getUserId());
+            if (userAccounts == null || userAccounts.isEmpty()) 
+            {
+                Alert a = new Alert(Alert.AlertType.INFORMATION);
+                a.setHeaderText("No accounts yet");
+                a.setContentText("Your login worked, but you have no bank accounts created yet.\n\nWe’ll add an account-creation UI next.");
+                a.showAndWait();
+            }
             showDashboard();
+
         });
 
         // Press Enter in password = login
@@ -466,8 +692,8 @@ public class MainUI extends Application {
         });
 
         accounts.setOnAction(e -> {
-            pageTitle.setText("Accounts (Coming soon)");
-            appRoot.setCenter(buildPlaceholder("Accounts", "We’ll build accounts UI next."));
+            pageTitle.setText("Accounts");
+            appRoot.setCenter(buildAccountsPage());
         });
 
         cards.setOnAction(e -> {
@@ -506,6 +732,105 @@ public class MainUI extends Application {
         );
 
         return sidebar;
+    }
+
+    private Node buildAccountsPage() 
+    {
+        VBox wrapper = new VBox(16);
+        wrapper.setPadding(new Insets(18));
+        wrapper.getStyleClass().add("pageWrapper");
+
+        Label title = new Label("Your Accounts");
+        title.getStyleClass().add("panelTitle");
+
+        // Table
+        TableView<Account> table = new TableView<>();
+        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        table.setFixedCellSize(40);
+        VBox.setVgrow(table, Priority.ALWAYS);
+
+        TableColumn<Account, String> colNum = new TableColumn<>("Account #");
+        colNum.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().getAccountNumber()));
+
+        TableColumn<Account, String> colType = new TableColumn<>("Type");
+        colType.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().getAccountType()));
+
+        TableColumn<Account, String> colBal = new TableColumn<>("Balance");
+        colBal.setCellValueFactory(d -> new SimpleStringProperty(money(d.getValue().getBalance())));
+
+        TableColumn<Account, String> colStatus = new TableColumn<>("Status");
+        colStatus.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().getStatus()));
+
+        table.getColumns().addAll(colNum, colType, colBal, colStatus);
+
+        Runnable reload = () -> {
+            if (loggedInUser == null) return;
+            userAccounts = accountDAO.getAccountsByUserId(loggedInUser.getUserId());
+            table.setItems(FXCollections.observableArrayList(userAccounts));
+        };
+        reload.run();
+
+        // Create account controls
+        ComboBox<String> typeBox = new ComboBox<>();
+        typeBox.setItems(FXCollections.observableArrayList("CHEQUING", "SAVINGS"));
+        typeBox.setValue("CHEQUING");
+
+        TextField initialBalance = new TextField("0.00");
+        initialBalance.setPromptText("Initial balance");
+
+        Button createBtn = new Button("Create Account");
+        createBtn.getStyleClass().add("primaryBtn");
+
+        createBtn.setOnAction(e -> {
+            if (loggedInUser == null) return;
+
+            BigDecimal bal;
+            try {
+                bal = new BigDecimal(initialBalance.getText().trim());
+                if (bal.compareTo(BigDecimal.ZERO) < 0) {
+                    showSimpleAlert("Invalid balance", "Initial balance cannot be negative.");
+                    return;
+                }
+            } catch (Exception ex) {
+                showSimpleAlert("Invalid number", "Enter a valid balance like 0.00 or 500.00");
+                return;
+            }
+
+            String accNumber = accountDAO.generateAccountNumber();
+
+            Account acc = new Account(
+                    loggedInUser.getUserId(),
+                    accNumber,
+                    typeBox.getValue(),
+                    bal,
+                    "ACTIVE"
+            );
+
+            boolean ok = accountDAO.createAccount(acc);
+            if (!ok) {
+                showSimpleAlert("Failed", "Account could not be created. Check DB.");
+                return;
+            }
+
+            showSimpleAlert("Success ✅", "Account created: " + accNumber);
+            refreshDashboardData();
+            reload.run();
+        });
+
+        HBox createRow = new HBox(10,
+                new Label("Type:"), typeBox,
+                new Label("Initial Balance:"), initialBalance,
+                createBtn
+        );
+        createRow.setAlignment(Pos.CENTER_LEFT);
+
+        VBox card = new VBox(12, title, createRow, table);
+        card.getStyleClass().add("panel");
+        card.setPadding(new Insets(16));
+        VBox.setVgrow(card, Priority.ALWAYS);
+
+        wrapper.getChildren().add(card);
+        return wrapper;
     }
 
     private Button navButton(String text) {
@@ -557,21 +882,35 @@ public class MainUI extends Application {
        DASHBOARD CONTENT
        ========================= */
 
-    private Node buildDashboard() {
+    private Node buildDashboard() 
+    {
         VBox wrapper = new VBox(18);
         wrapper.setPadding(new Insets(18));
         wrapper.getStyleClass().add("pageWrapper");
 
+        Account chequing = pickAccountForCard("CHEQUING", "CHECKING", "CHEQUING ACCOUNT");
+        Account savings  = pickAccountForCard("SAVINGS", "SAVING");
+
+        // Fallbacks if account_type naming isn't exactly matching
+        if (chequing == null && userAccounts != null && userAccounts.size() >= 1) chequing = userAccounts.get(0);
+        if (savings  == null && userAccounts != null && userAccounts.size() >= 2) savings  = userAccounts.get(1);
+
+        BigDecimal chequingBal = chequing != null ? chequing.getBalance() : BigDecimal.ZERO;
+        BigDecimal savingsBal  = savings  != null ? savings.getBalance()  : BigDecimal.ZERO;
+
+        // Credit is dummy for now (until you add a credit/limit table/column)
+        BigDecimal creditLimit = new BigDecimal("5000.00");
+
         HBox cardsRow = new HBox(16,
-                balanceCard("Chequing", "$5000.00", "Total Balance"),
-                balanceCard("Savings", "$5000.00", "Total Balance"),
-                balanceCard("Credit", "$5000.00", "Available Credit")
+                balanceCard("Chequing", money(chequingBal), "Total Balance"),
+                balanceCard("Savings",  money(savingsBal),  "Total Balance"),
+                balanceCard("Credit",   money(creditLimit), "Available Credit")
         );
         for (var n : cardsRow.getChildren()) HBox.setHgrow(n, Priority.ALWAYS);
 
         HBox bottomRow = new HBox(16);
         VBox statsPanel = buildStatsPanel();
-        VBox txPanel = buildTransactionsPanel();
+        VBox txPanel = buildTransactionsPanelReal(chequing, savings); // ✅ real transactions
 
         HBox.setHgrow(statsPanel, Priority.ALWAYS);
         HBox.setHgrow(txPanel, Priority.ALWAYS);
@@ -641,7 +980,7 @@ public class MainUI extends Application {
         return panel;
     }
 
-    private VBox buildTransactionsPanel() {
+    private VBox buildTransactionsPanelBox() {
         VBox panel = new VBox(12);
         panel.getStyleClass().add("panel");
         panel.setPadding(new Insets(16));
@@ -700,7 +1039,192 @@ public class MainUI extends Application {
         }
     }
 
-    public static void main(String[] args) {
+    private static class TxInput 
+    {
+        final BigDecimal amount;
+        final String description;
+
+        TxInput(BigDecimal amount, String description) 
+        {
+            this.amount = amount;
+            this.description = description;
+        }
+    }
+
+    private static class TransferInput 
+    {
+        final int fromAccountId;
+        final int toAccountId;
+        final BigDecimal amount;
+        final String description;
+
+        TransferInput(int fromId, int toId, BigDecimal amount, String desc) {
+            this.fromAccountId = fromId;
+            this.toAccountId = toId;
+            this.amount = amount;
+            this.description = desc;
+        }
+    }
+
+    private Optional<TxInput> showAmountDialog(String title, String header) 
+    {
+        Dialog<TxInput> dialog = new Dialog<>();
+        dialog.setTitle(title);
+        dialog.setHeaderText(header);
+
+        ButtonType okType = new ButtonType("Confirm", ButtonBar.ButtonData.OK_DONE);
+        dialog.getDialogPane().getButtonTypes().addAll(okType, ButtonType.CANCEL);
+
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+        grid.setPadding(new Insets(12));
+
+        TextField amountField = new TextField();
+        amountField.setPromptText("Amount (e.g., 100.00)");
+
+        TextField descField = new TextField();
+        descField.setPromptText("Description");
+
+        grid.add(new Label("Amount"), 0, 0);
+        grid.add(amountField, 1, 0);
+        grid.add(new Label("Description"), 0, 1);
+        grid.add(descField, 1, 1);
+
+        dialog.getDialogPane().setContent(grid);
+
+        Node okBtn = dialog.getDialogPane().lookupButton(okType);
+        okBtn.setDisable(true);
+
+        amountField.textProperty().addListener((obs, o, n) -> okBtn.setDisable(n.trim().isEmpty()));
+
+        dialog.setResultConverter(btn -> {
+            if (btn != okType) return null;
+
+            try {
+                BigDecimal amt = new BigDecimal(amountField.getText().trim());
+                if (amt.compareTo(BigDecimal.ZERO) <= 0) {
+                    showSimpleAlert("Invalid amount", "Amount must be positive.");
+                    return null;
+                }
+                String desc = descField.getText() == null ? "" : descField.getText().trim();
+                if (desc.isBlank()) desc = title + " via UI";
+                return new TxInput(amt, desc);
+            } catch (Exception ex) {
+                showSimpleAlert("Invalid amount", "Enter a valid number like 100.00");
+                return null;
+            }
+        });
+
+        return dialog.showAndWait();
+    }
+
+    private Optional<TransferInput> showTransferDialog() 
+    {
+        Dialog<TransferInput> dialog = new Dialog<>();
+        dialog.setTitle("Transfer");
+        dialog.setHeaderText("Transfer money between accounts");
+
+        ButtonType okType = new ButtonType("Transfer", ButtonBar.ButtonData.OK_DONE);
+        dialog.getDialogPane().getButtonTypes().addAll(okType, ButtonType.CANCEL);
+
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+        grid.setPadding(new Insets(12));
+
+        ComboBox<Account> fromBox = new ComboBox<>();
+        ComboBox<Account> toBox = new ComboBox<>();
+        fromBox.setItems(FXCollections.observableArrayList(userAccounts));
+        toBox.setItems(FXCollections.observableArrayList(userAccounts));
+
+        fromBox.setCellFactory(cb -> new ListCell<>() {
+            @Override protected void updateItem(Account a, boolean empty) {
+                super.updateItem(a, empty);
+                setText(empty || a == null ? "" : a.getAccountNumber() + " (" + a.getAccountType() + ")");
+            }
+        });
+        fromBox.setButtonCell(fromBox.getCellFactory().call(null));
+
+        toBox.setCellFactory(fromBox.getCellFactory());
+        toBox.setButtonCell(toBox.getCellFactory().call(null));
+
+        TextField amountField = new TextField();
+        amountField.setPromptText("Amount (e.g., 200.00)");
+
+        TextField descField = new TextField();
+        descField.setPromptText("Description");
+
+        grid.add(new Label("From"), 0, 0);
+        grid.add(fromBox, 1, 0);
+        grid.add(new Label("To"), 0, 1);
+        grid.add(toBox, 1, 1);
+        grid.add(new Label("Amount"), 0, 2);
+        grid.add(amountField, 1, 2);
+        grid.add(new Label("Description"), 0, 3);
+        grid.add(descField, 1, 3);
+
+        dialog.getDialogPane().setContent(grid);
+
+        Node okBtn = dialog.getDialogPane().lookupButton(okType);
+        okBtn.setDisable(true);
+
+        Runnable validate = () -> {
+            boolean ok = fromBox.getValue() != null
+                    && toBox.getValue() != null
+                    && !amountField.getText().trim().isEmpty();
+            okBtn.setDisable(!ok);
+        };
+
+        fromBox.valueProperty().addListener((obs,o,n) -> validate.run());
+        toBox.valueProperty().addListener((obs,o,n) -> validate.run());
+        amountField.textProperty().addListener((obs,o,n) -> validate.run());
+
+        dialog.setResultConverter(btn -> {
+            if (btn != okType) return null;
+
+            Account from = fromBox.getValue();
+            Account to = toBox.getValue();
+
+            if (from == null || to == null) return null;
+            if (from.getAccountId() == to.getAccountId()) {
+                showSimpleAlert("Invalid transfer", "From and To cannot be the same account.");
+                return null;
+            }
+
+            try {
+                BigDecimal amt = new BigDecimal(amountField.getText().trim());
+                if (amt.compareTo(BigDecimal.ZERO) <= 0) {
+                    showSimpleAlert("Invalid amount", "Amount must be positive.");
+                    return null;
+                }
+
+                String desc = descField.getText() == null ? "" : descField.getText().trim();
+                if (desc.isBlank()) desc = "Transfer via UI";
+
+                return new TransferInput(from.getAccountId(), to.getAccountId(), amt, desc);
+
+            } catch (Exception ex) {
+                showSimpleAlert("Invalid amount", "Enter a valid number like 200.00");
+                return null;
+            }
+        });
+
+        return dialog.showAndWait();
+    }
+
+    private void refreshDashboardData() 
+    {
+        if (loggedInUser == null) return;
+        userAccounts = accountDAO.getAccountsByUserId(loggedInUser.getUserId());
+        // refresh center content (dashboard) without breaking layout
+        if (appRoot != null && pageTitle != null && "Dashboard".equals(pageTitle.getText())) {
+            appRoot.setCenter(buildDashboard());
+        }
+    }
+
+    public static void main(String[] args) 
+    {
         launch(args);
     }
 }
