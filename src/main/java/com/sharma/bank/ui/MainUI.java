@@ -29,6 +29,10 @@ import java.util.regex.Pattern;
 
 public class MainUI extends Application 
 {
+    // ---- Top navigation pages (marketing site) ----
+    private enum PublicPage { HOME, ABOUT, CONTACT, LOGIN }
+    private PublicPage activePublicPage = PublicPage.LOGIN;
+
 
     private Stage stage;
     private Scene scene;
@@ -71,7 +75,8 @@ public class MainUI extends Application
         sceneRoot.getStyleClass().add("appRoot");
 
         // First screen: Login
-        sceneRoot.getChildren().setAll(buildLoginScreen());
+        //sceneRoot.getChildren().setAll(buildLoginScreen());
+        showPublicPage(PublicPage.LOGIN);
 
         scene = new Scene(sceneRoot, 1200, 760);
 
@@ -299,7 +304,7 @@ public class MainUI extends Application
         root.getStyleClass().add("loginRoot");
 
         // Top bar (brand)
-        HBox top = new HBox();
+        /*HBox top = new HBox();
         top.getStyleClass().add("loginTopBar");
         top.setPadding(new Insets(16, 18, 16, 18));
 
@@ -313,7 +318,10 @@ public class MainUI extends Application
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-        top.getChildren().addAll(brandBox, spacer);
+        top.getChildren().addAll(brandBox, spacer);*/
+        activePublicPage = PublicPage.LOGIN;
+        HBox top = buildTopNavBar();
+        root.setTop(top);
 
         // Center area
         HBox center = new HBox(24);
@@ -657,6 +665,7 @@ public class MainUI extends Application
         logout.getStyleClass().add("ghostBtn");
         logout.setOnAction(e -> {
             loggedInUser = null;
+            activePublicPage = PublicPage.LOGIN;
             sceneRoot.getChildren().setAll(buildLoginScreen());
         });
 
@@ -1220,6 +1229,107 @@ public class MainUI extends Application
         // refresh center content (dashboard) without breaking layout
         if (appRoot != null && pageTitle != null && "Dashboard".equals(pageTitle.getText())) {
             appRoot.setCenter(buildDashboard());
+        }
+    }
+
+    private void showPublicPage(PublicPage page) 
+    {
+        activePublicPage = page;
+
+        switch (page) {
+            case HOME -> sceneRoot.getChildren().setAll(buildPublicShell("Home"));
+            case ABOUT -> sceneRoot.getChildren().setAll(buildPublicShell("About Us"));
+            case CONTACT -> sceneRoot.getChildren().setAll(buildPublicShell("Contact"));
+            case LOGIN -> sceneRoot.getChildren().setAll(buildLoginScreen()); // your existing screen
+        }
+    }
+
+    // Builds the outer shell + top nav like PDF, with an empty white card inside
+    private Node buildPublicShell(String title) 
+    {
+        BorderPane root = new BorderPane();
+        root.getStyleClass().add("loginRoot"); // reuse your existing light background if you want
+
+        // Top bar with brand + nav
+        HBox top = buildTopNavBar();
+        root.setTop(top);
+
+        // Center white card placeholder
+        StackPane centerWrap = new StackPane();
+        centerWrap.setPadding(new Insets(40));
+
+        VBox card = new VBox(12);
+        card.getStyleClass().add("authCard"); // reuse your existing card style (clean white rounded)
+        card.setPadding(new Insets(28));
+        card.setMaxWidth(900);
+        card.setMinHeight(520);
+
+        Label t = new Label(title);
+        t.getStyleClass().add("authTitle");
+
+        Label placeholder = new Label("(Content placeholder)");
+        placeholder.getStyleClass().add("muted");
+
+        card.getChildren().addAll(t, placeholder);
+        centerWrap.getChildren().add(card);
+
+        root.setCenter(centerWrap);
+        return root;
+    }
+
+    // Builds PDF-style top nav (HOME / ABOUT / CONTACT / LOG IN) with underline on active
+    private HBox buildTopNavBar() {
+        activePublicPage = PublicPage.LOGIN;
+        HBox top = new HBox(18);
+        top.getStyleClass().add("loginTopBar");
+        top.setPadding(new Insets(16, 18, 16, 18));
+        top.setAlignment(Pos.CENTER_LEFT);
+
+        VBox brandBox = new VBox();
+        brandBox.getStyleClass().add("brandBox");
+        Label brandTop = new Label("LunarOne");
+        brandTop.getStyleClass().add("brandTop");
+        Label brandBottom = new Label("Finance.");
+        brandBottom.getStyleClass().add("brandBottom");
+        brandBox.getChildren().addAll(brandTop, brandBottom);
+
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+
+        // Nav items (use Hyperlink for “underline” style)
+        Hyperlink home = navLink("HOME", PublicPage.HOME);
+        Hyperlink about = navLink("ABOUT US", PublicPage.ABOUT);
+        Hyperlink contact = navLink("CONTACT", PublicPage.CONTACT);
+        Hyperlink login = navLink("LOG IN", PublicPage.LOGIN);
+
+        HBox nav = new HBox(18, home, about, contact, login);
+        nav.setAlignment(Pos.CENTER_RIGHT);
+
+        // Apply active underline/bold
+        applyActiveNav(home, about, contact, login);
+
+        top.getChildren().addAll(brandBox, spacer, nav);
+        return top;
+    }
+
+    private Hyperlink navLink(String text, PublicPage target) {
+        Hyperlink h = new Hyperlink(text);
+        h.getStyleClass().add("topNavLink");
+        h.setOnAction(e -> showPublicPage(target));
+        return h;
+    }
+
+    private void applyActiveNav(Hyperlink home, Hyperlink about, Hyperlink contact, Hyperlink login) {
+        home.getStyleClass().remove("topNavActive");
+        about.getStyleClass().remove("topNavActive");
+        contact.getStyleClass().remove("topNavActive");
+        login.getStyleClass().remove("topNavActive");
+
+        switch (activePublicPage) {
+            case HOME -> home.getStyleClass().add("topNavActive");
+            case ABOUT -> about.getStyleClass().add("topNavActive");
+            case CONTACT -> contact.getStyleClass().add("topNavActive");
+            case LOGIN -> login.getStyleClass().add("topNavActive");
         }
     }
 

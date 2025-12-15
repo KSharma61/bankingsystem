@@ -222,3 +222,21 @@
     -fx-padding: 10 16;
 }
 .secondaryBtn:hover { -fx-background-color: rgba(11,35,74,0.18); }
+
+.topNavLink {
+    -fx-text-fill: rgba(255,255,255,0.85);
+    -fx-font-weight: 700;
+    -fx-underline: false;
+    -fx-border-color: transparent;
+    -fx-padding: 2 2 6 2;
+}
+
+.topNavLink:hover {
+    -fx-text-fill: white;
+}
+
+.topNavActive {
+    -fx-text-fill: white;
+    -fx-underline: true;
+    -fx-font-weight: 800;
+}
